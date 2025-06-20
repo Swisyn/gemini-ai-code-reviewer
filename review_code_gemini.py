@@ -307,7 +307,7 @@ def main():
     pr_details = get_pr_details()
     event_data = json.load(open(os.environ["GITHUB_EVENT_PATH"], "r"))
 
-    api_url = os.environ.get("GITHUB_API_URL")
+    api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
     event_name = os.environ.get("GITHUB_EVENT_NAME")
     if event_name == "issue_comment":
         # Process comment trigger
