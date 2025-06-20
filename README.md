@@ -60,7 +60,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: Swisyn/gemini-ai-code-reviewer@v1.0
+      - uses: Swisyn/gemini-ai-code-reviewer@v1.0.0
         with:
           GITHUB_API_URL: "https://github.mycompany.com/api/v3"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
