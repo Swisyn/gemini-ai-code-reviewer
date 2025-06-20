@@ -39,6 +39,8 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.GITHUB_TOKEN }}
+        GITHUB_API_URL: ${{ inputs.GITHUB_API_URL }}
         GEMINI_API_KEY: ${{ inputs.GEMINI_API_KEY }}
-        EXCLUDE: ${{ inputs.EXCLUDE }}
+        GEMINI_MODEL: ${{ inputs.GEMINI_MODEL }}
+        INPUT_EXCLUDE: ${{ inputs.EXCLUDE }}
       run: python ${{ github.action_path }}/review_code_gemini.py
