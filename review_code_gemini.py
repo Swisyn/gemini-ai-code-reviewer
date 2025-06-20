@@ -11,7 +11,8 @@ from unidiff import Hunk, PatchedFile, PatchSet
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 
 # Initialize GitHub and Gemini clients
-gh = Github(GITHUB_TOKEN)
+github_api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+gh = Github(base_url=github_api_url, login_or_token=GITHUB_TOKEN)
 gemini_client = Client.configure(api_key=os.environ.get('GEMINI_API_KEY'))
 
 
@@ -40,11 +41,16 @@ def get_pr_details() -> PRDetails:
         repo_full_name = event_data["repository"]["full_name"]
 
     owner, repo = repo_full_name.split("/")
-
-    repo = gh.get_repo(repo_full_name)
-    pr = repo.get_pull(pull_number)
-
-    return PRDetails(owner, repo.name, pull_number, pr.title, pr.body)
+    
+    try:
+        repo_obj = gh.get_repo(repo_full_name)
+        pr = repo_obj.get_pull(pull_number)
+        print(f"Successfully fetched PR details: PR#{pull_number} - {pr.title}")
+        return PRDetails(owner, repo, pull_number, pr.title, pr.body)
+    except Exception as e:
+        print(f"Error fetching PR details: {str(e)}")
+        # Fall back to basic info if we can't get the full PR details
+        return PRDetails(owner, repo, pull_number, "Unknown Title", "Unknown Description")
 
 
 def get_diff(api_url: str, owner: str, repo: str, pull_number: int) -> str:
@@ -61,7 +67,7 @@ def get_diff(api_url: str, owner: str, repo: str, pull_number: int) -> str:
     pr_api_url = f"{api_url}/repos/{repo_name}/pulls/{pull_number}"
 
     headers = {
-        'Authorization': f'Bearer {GITHUB_TOKEN}',  # Changed to Bearer format
+        'Authorization': f'Bearer {GITHUB_TOKEN}',
         'Accept': 'application/vnd.github.v3.diff'
     }
 
@@ -304,17 +310,25 @@ def parse_diff(diff_str: str) -> List[Dict[str, Any]]:
 
 def main():
     """Main function to execute the code review process."""
+    # Print environment and configuration information for debugging
+    print(f"GitHub API URL: {os.environ.get('GITHUB_API_URL', 'Not set')}")
+    print(f"GitHub Event Name: {os.environ.get('GITHUB_EVENT_NAME', 'Not set')}")
+    print(f"Token starts with: {GITHUB_TOKEN[:4]}{'*' * 16}")
+    print(f"Gemini Model: {os.environ.get('GEMINI_MODEL', 'Using default')}")
+    
     pr_details = get_pr_details()
+    print(f"PR Details: Owner={pr_details.owner}, Repo={pr_details.repo}, PR#{pr_details.pull_number}")
     event_data = json.load(open(os.environ["GITHUB_EVENT_PATH"], "r"))
 
     api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
     event_name = os.environ.get("GITHUB_EVENT_NAME")
-    if event_name == "issue_comment":
-        # Process comment trigger
-        if not event_data.get("issue", {}).get("pull_request"):
+    if event_name == "issue_comment" or event_name == "pull_request" or event_name == "pull_request_review":
+        # Process PR-related events
+        if event_name == "issue_comment" and not event_data.get("issue", {}).get("pull_request"):
             print("Comment was not on a pull request")
             return
 
+        print(f"Processing {event_name} event for PR #{pr_details.pull_number}")
         diff = get_diff(api_url, pr_details.owner, pr_details.repo, pr_details.pull_number)
         if not diff:
             print("There is no diff found")
