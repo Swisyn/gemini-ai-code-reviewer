@@ -1,7 +1,8 @@
 import json
 import os
 from typing import List, Dict, Any
-import google.generativeai as Client
+from google import genai
+from google.genai import types
 from github import Github
 import difflib
 import requests
@@ -13,7 +14,8 @@ GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 # Initialize GitHub and Gemini clients
 github_api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 gh = Github(base_url=github_api_url, login_or_token=GITHUB_TOKEN)
-gemini_client = Client.configure(api_key=os.environ.get('GEMINI_API_KEY'))
+# Initialize the Gemini client using the new approach
+genai_client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY'))
 
 
 class PRDetails:
@@ -166,18 +168,23 @@ Git diff to review:
 def get_ai_response(prompt: str) -> List[Dict[str, str]]:
     """Sends the prompt to Gemini API and retrieves the response."""
     # Use 'gemini-2.0-flash-001' as a fallback default value if the environment variable isn't set
-    gemini_model = Client.GenerativeModel(os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash-001'))
+    model_name = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash-001')
+    
+    # Create generation config using the types module
+    generation_config = types.GenerateContentConfig(
+        max_output_tokens=8192,
+        temperature=0.8,
+        top_p=0.95,
+    )
 
-    generation_config = {
-        "max_output_tokens": 8192,
-        "temperature": 0.8,
-        "top_p": 0.95,
-    }
-
-    print("===== The promt sent to Gemini is: =====")
+    print("===== The prompt sent to Gemini is: =====")
     print(prompt)
     try:
-        response = gemini_model.generate_content(prompt, generation_config=generation_config)
+        response = genai_client.models.generate_content(
+            model=model_name, 
+            contents=prompt, 
+            config=generation_config
+        )
 
         response_text = response.text.strip()
         if response_text.startswith('```json'):
