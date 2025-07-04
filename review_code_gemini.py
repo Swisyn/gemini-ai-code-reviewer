@@ -118,10 +118,11 @@ def analyze_code(parsed_diff: List[Dict[str, Any]], pr_details: PRDetails) -> Li
                 continue
 
             hunk = Hunk()
-            hunk.source_start = 1
-            hunk.source_length = len(hunk_lines)
-            hunk.target_start = 1
-            hunk.target_length = len(hunk_lines)
+            # Use the hunk information from the parsed diff if available
+            hunk.source_start = hunk_data.get('source_start', 1)
+            hunk.source_length = hunk_data.get('source_length', len(hunk_lines))
+            hunk.target_start = hunk_data.get('target_start', 1)
+            hunk.target_length = hunk_data.get('target_length', len(hunk_lines))
             hunk.content = '\n'.join(hunk_lines)
 
             prompt = create_prompt(file_info, hunk, pr_details)
@@ -242,10 +243,29 @@ def create_comment(file: FileInfo, hunk: Hunk, ai_responses: List[Dict[str, str]
                 print(f"Warning: Line number {line_number} is outside hunk range")
                 continue
 
+            # Extract the diff hunk lines as a list
+            diff_lines = hunk.content.splitlines()
+            
+            # For GitHub PR reviews, position is the line number in the diff
+            # Line numbers in the target file are relative to hunk.target_start
+            # We need to map line_number to an absolute position in the diff
+            
+            # For GitHub API the position is the line number in the entire diff
+            # where we want to add the comment, starting at line 1 for the first line
+            # of the file's diff, including headers
+            
+            # Since we're providing the hunk directly, we'll use the position within this hunk
+            position = line_number
+            
+            # Create the comment with the correct parameters for the GitHub API
             comment = {
                 "body": ai_response["reviewComment"],
                 "path": file.path,
-                "position": line_number
+                "position": position,
+                # Additional parameters that help GitHub locate the comment correctly
+                "start_line": None,  # For multi-line comments (optional)
+                "line": line_number + hunk.target_start - 1,  # Absolute line number in the file
+                "side": "RIGHT"  # RIGHT for additions (the "after" state)
             }
             print(f"Created comment: {json.dumps(comment, indent=2)}")
             comments.append(comment)
@@ -266,25 +286,59 @@ def create_review_comment(
 
     repo = gh.get_repo(f"{owner}/{repo}")
     pr = repo.get_pull(pull_number)
+    
     try:
-        # Create the review with only the required fields
+        # Get the latest commit SHA from the PR
+        commits = list(pr.get_commits())
+        if not commits:
+            print("Error: No commits found in the PR")
+            return
+            
+        latest_commit = commits[-1]
+        commit_sha = latest_commit.sha
+        print(f"Using latest commit SHA: {commit_sha}")
+        
+        # Add commit_id to all comments
+        for comment in comments:
+            comment["commit_id"] = commit_sha
+        
+        # Create the review with the required fields
         review = pr.create_review(
             body="Gemini AI Code Reviewer Comments",
             comments=comments,
-            event="COMMENT"
+            event="COMMENT",
+            commit_id=commit_sha  # Pass the commit_id at the review level as well
         )
         print(f"Review created successfully with ID: {review.id}")
 
     except Exception as e:
         print(f"Error creating review: {str(e)}")
         print(f"Error type: {type(e)}")
-        print(f"Review payload: {comments}")
+        print(f"Review payload: {json.dumps(comments, indent=2)}")
 
 def parse_diff(diff_str: str) -> List[Dict[str, Any]]:
     """Parses the diff string and returns a structured format."""
     files = []
     current_file = None
     current_hunk = None
+    
+    # Helper function to parse hunk header
+    def parse_hunk_header(header):
+        # Extract line numbers from the hunk header (e.g., @@ -1,7 +1,9 @@)
+        import re
+        match = re.search(r'@@ -(\d+),(\d+) \+(\d+),(\d+) @@', header)
+        if match:
+            source_start = int(match.group(1))
+            source_length = int(match.group(2))
+            target_start = int(match.group(3))
+            target_length = int(match.group(4))
+            return {
+                'source_start': source_start,
+                'source_length': source_length,
+                'target_start': target_start,
+                'target_length': target_length
+            }
+        return None
 
     for line in diff_str.splitlines():
         if line.startswith('diff --git'):
@@ -302,7 +356,10 @@ def parse_diff(diff_str: str) -> List[Dict[str, Any]]:
 
         elif line.startswith('@@'):
             if current_file:
+                hunk_info = parse_hunk_header(line)
                 current_hunk = {'header': line, 'lines': []}
+                if hunk_info:
+                    current_hunk.update(hunk_info)
                 current_file['hunks'].append(current_hunk)
 
         elif current_hunk is not None:
